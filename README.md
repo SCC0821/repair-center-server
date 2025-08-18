@@ -293,3 +293,250 @@ pnpm add -D prettier eslint-config-prettier eslint-plugin-prettier
 4. **API 文档:**
    在开发过程中，请记得在 `Apifox` 中同步创建和更新您的 API 文档。
 
+---
+
+## 步骤 7: 配置高性能日志 (Pino)
+
+为了在生产环境中获得高性能且结构化的日志，我们集成 `pino`。对于开发环境，我们使用 `pino-pretty` 来美化输出，使其更易读。对于生产环境，我们使用 `pino-roll` 来实现日志的自动轮转（rotation），防止单个日志文件无限增大。
+
+### 1. 安装依赖
+
+```bash
+# 安装 pino 核心库和 NestJS 集成库
+pnpm add nestjs-pino pino-http
+
+# 安装 pino-roll 用于生产环境日志轮转
+pnpm add pino-roll
+
+# 安装 pino-pretty 作为开发依赖，用于美化日志输出
+pnpm add -D pino-pretty
+```
+
+### 2. 配置 AppModule
+
+修改 `src/app.module.ts`，导入并配置 `LoggerModule`。这是所有配置的核心。
+
+```typescript
+// src/app.module.ts
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { LoggerModule } from 'nestjs-pino';
+// ... other imports
+
+@Module({
+  imports: [
+    // ... ConfigModule
+    LoggerModule.forRoot({
+      pinoHttp: {
+        // 在生产环境中使用 pino-roll 进行日志轮转
+        transport:
+          process.env.NODE_ENV === 'production'
+            ? {
+                target: 'pino-roll',
+                options: {
+                  file: './logs/app.log', // 日志文件路径
+                  frequency: 'daily',     // 按天轮转
+                  size: '10M',            // 每个文件最大 10MB
+                  mkdir: true,            // 自动创建目录
+                },
+              }
+            : {
+                // 在开发环境中使用 pino-pretty 美化输出
+                target: 'pino-pretty',
+                options: {
+                  singleLine: true,
+                  colorize: true,
+                },
+              },
+        // 设置日志级别
+        level: process.env.NODE_ENV !== 'production' ? 'debug' : 'info',
+      },
+    }),
+    // ... other modules
+  ],
+  // ...
+})
+export class AppModule {}
+```
+
+### 3. 修改 `main.ts`
+
+为了让 NestJS 在应用启动时就完全接管日志，并能记录所有 HTTP 请求，需要修改 `src/main.ts`。
+
+```typescript
+// src/main.ts
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { Logger } from 'nestjs-pino'; // 导入 Logger
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule, {
+    // 缓冲日志，直到 pino logger 准备就绪
+    bufferLogs: true,
+  });
+
+  // 将 pino 设置为全局 logger
+  app.useLogger(app.get(Logger));
+
+  await app.listen(3000);
+}
+bootstrap();
+```
+
+### 4. 在代码中使用 Logger
+
+现在你可以在任何服务或控制器中注入并使用 `PinoLogger`。
+
+```typescript
+// src/any.service.ts
+import { Injectable } from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+
+@Injectable()
+export class AnyService {
+  constructor(
+    @InjectPinoLogger(AnyService.name)
+    private readonly logger: PinoLogger,
+  ) {}
+
+  doSomething() {
+    this.logger.info('This is an informational message.');
+    this.logger.debug({ data: { user: 'test' } }, 'This is a debug message with context.');
+    
+    try {
+      throw new Error('A sample error');
+    } catch (error) {
+      this.logger.error({ err: error }, 'Something went wrong.');
+    }
+  }
+}
+```
+
+### 5. 更新 `.gitignore`
+
+确保日志目录不被提交到 Git 仓库。
+
+```gitignore
+# .gitignore
+
+# ... other ignores
+
+# Log files
+logs
+```
+
+### 运行效果
+
+- **开发环境**: 运行 `pnpm run start:dev`，你将在控制台看到彩色的、单行显示的日志。
+- **生产环境**: 设置 `NODE_ENV=production` 后运行应用，日志将以 JSON 格式写入到 `./logs/app.log` 文件中，并根据配置进行每日或按大小轮转。
+
+---
+
+## 步骤 8: 配置全局异常过滤器
+
+为了捕获所有未处理的异常，并以统一、标准的格式返回给客户端，我们需要配置一个全局异常过滤器。
+
+### 1. 创建过滤器文件
+
+在 `src/common/filters/` 目录下创建一个新文件 `all-exceptions.filter.ts`。如果 `common/filters` 目录不存在，请先创建它。
+
+```typescript
+// src/common/filters/all-exceptions.filter.ts
+
+import {
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
+import { Request, Response } from 'express';
+
+@Catch()
+export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly logger = new Logger(AllExceptionsFilter.name);
+
+  catch(exception: unknown, host: ArgumentsHost) {
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
+
+    const status =
+      exception instanceof HttpException
+        ? exception.getStatus()
+        : HttpStatus.INTERNAL_SERVER_ERROR;
+
+    // 使用类型守卫来安全地提取错误信息
+    const getErrorMessage = (): string => {
+      if (exception instanceof HttpException) {
+        const errorResponse = exception.getResponse();
+        if (typeof errorResponse === 'string') {
+          return errorResponse;
+        }
+        // 采用更安全的类型守卫方式
+        if (typeof errorResponse === 'object' && errorResponse !== null) {
+          // 先将属性作为一个 unknown 类型取出
+          const potentialMessage = (errorResponse as Record<string, unknown>)
+            .message;
+          // 然后再对取出的值进行类型检查
+          if (typeof potentialMessage === 'string') {
+            return potentialMessage;
+          }
+        }
+      }
+      return 'Internal Server Error';
+    };
+
+    const message = getErrorMessage();
+
+    const errorResponse = {
+      statusCode: status,
+      timestamp: new Date().toISOString(),
+      path: request.url,
+      message, // 这里的赋值现在是类型安全的
+    };
+
+    if (status >= 500) {
+      this.logger.error(
+        `[Internal Error] ${request.method} ${request.url}`,
+        exception instanceof Error ? exception.stack : String(exception),
+      );
+    } else {
+      this.logger.warn(
+        `[Business Exception] ${request.method} ${request.url} - ${JSON.stringify(
+          errorResponse,
+        )}`,
+      );
+    }
+
+    response.status(status).json(errorResponse);
+  }
+}
+```
+
+### 2. 全局注册过滤器
+
+修改 `src/main.ts` 文件，在应用启动时注册这个全局过滤器。
+
+```typescript
+// src/main.ts
+
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter'; // 导入过滤器
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  // ... 其他配置，例如 app.useLogger()
+
+  // 注册为全局过滤器
+  app.useGlobalFilters(new AllExceptionsFilter());
+
+  await app.listen(3000);
+}
+bootstrap();
+```
+
+完成这些步骤后，应用中的任何未捕获异常都将被此过滤器处理，确保了API错误响应的一致性。
