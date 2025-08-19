@@ -23,6 +23,8 @@ import { LoggerModule as Logger } from 'nestjs-pino';
                 options: {
                   singleLine: true,
                   colorize: true,
+                  // 忽略这些字段，让日志更简洁
+                  ignore: 'pid,hostname,req.headers,req.remoteAddress,req.remotePort,res',
                 },
               },
         // 设置日志级别
