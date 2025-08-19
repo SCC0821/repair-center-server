@@ -719,3 +719,65 @@ export class UsersController {
 
 1.  在 Apifox 中选择 “导入” -> “文件”，上传由 `SwaggerModule` 生成的 JSON 文件。
 2.  你可以编写一个简单的脚本来将 OpenAPI 对象保存为本地 `swagger.json` 文件，方便在 CI/CD 流程中使用。
+
+---
+
+## 步骤 11: (推荐) 配置路径别名 (Path Alias)
+
+为了避免在项目中出现大量 `../../` 这样的相对路径，配置路径别名（例如，让 `@/` 指向 `src/`）是一个能极大提升代码可读性和可维护性的最佳实践。
+
+配置分为两步：让 TypeScript (编译时) 和 Node.js (运行时) 都能理解别名。
+
+### 1. 修改 `tsconfig.json` (配置编译时解析)
+
+在 `tsconfig.json` 的 `compilerOptions` 中，添加 `baseUrl` 和 `paths` 属性。
+
+```json
+// tsconfig.json
+{
+  "compilerOptions": {
+    // ... other options
+    "baseUrl": "./",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  }
+}
+```
+- `baseUrl`: 设置路径解析的基准目录。
+- `paths`: 定义别名规则。`@/*` 会被解析为 `src/*`。
+
+### 2. 修改启动命令 (配置运行时解析)
+
+Node.js 默认不认识别名，我们需要 `tsconfig-paths` 这个库来帮助它。
+
+**A. 安装依赖**
+```bash
+pnpm add -D tsconfig-paths
+```
+
+**B. 修改 `package.json`**
+
+更新 `start:prod` 脚本，使用 `-r` (`--require`) 标志在应用启动前加载 `tsconfig-paths`。
+
+**修改前:**
+```json
+"scripts": {
+  "start:prod": "node dist/main"
+}
+```
+
+**修改后:**
+```json
+"scripts": {
+  "start:prod": "node -r tsconfig-paths/register dist/main"
+}
+```
+> `start:dev` 命令通常无需修改，Nest CLI 会自动处理。
+
+### 3. 使用别名
+
+现在，你可以用更清晰的方式进行导入了。
+
+**告别:** `import { UsersService } from '../../users/users.service';`
+**拥抱:** `import { UsersService } from '@/users/users.service';`
