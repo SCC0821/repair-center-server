@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger } from 'nestjs-pino';
 import { VersioningType } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
@@ -18,6 +19,16 @@ async function bootstrap() {
     type: VersioningType.URI, // 设置版本控制类型为 URI
     defaultVersion: '1', // 可选：设置默认版本
   });
+  // 配置 Swagger 文档
+  const config = new DocumentBuilder()
+    .setTitle('维修中心 API 文档')
+    .setDescription('这是维修中心项目的 API 详细文档')
+    .setVersion('1.0')
+    .addTag('users', '用户模块')
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api-docs', app, document); // 设置文档访问路径为 /api-docs
   await app.listen(process.env.APP_PORT ?? 3000);
 }
-bootstrap();
+void bootstrap();

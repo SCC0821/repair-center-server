@@ -626,3 +626,96 @@ export class UsersController {
 ```
 
 通过这种方式，你可以让新旧版本的 API 在同一套代码中平滑地共存和演进。
+
+---
+
+## 步骤 10: 集成 API 文档 (Swagger & Apifox)
+
+为了保持 API 文档与代码同步，并方便团队协作和测试，我们采用“代码驱动文档”的策略。通过 `@nestjs/swagger` 包自动从代码生成 OpenAPI 规范，然后将其导入 Apifox。
+
+### 1. 安装依赖
+
+```bash
+pnpm add @nestjs/swagger
+```
+
+### 2. 在 `main.ts` 中初始化 Swagger
+
+在应用启动时，配置 Swagger 模块来扫描代码并生成文档。
+
+```typescript
+// src/main.ts
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  // ... 其他配置 ...
+
+  // 配置 Swagger 文档
+  const config = new DocumentBuilder()
+    .setTitle('维修中心 API 文档')
+    .setDescription('这是维修中心项目的 API 详细文档')
+    .setVersion('1.0')
+    .addTag('users', '用户模块')
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api-docs', app, document); // 设置文档访问路径为 /api-docs
+
+  await app.listen(3000);
+}
+bootstrap();
+```
+
+### 3. 使用装饰器丰富 API 信息
+
+为了生成内容详尽的文档，你需要在 DTO 和 Controller 中添加由 `@nestjs/swagger` 提供的装饰器。
+
+**示例 DTO:**
+```typescript
+// src/users/dto/create-user.dto.ts
+import { ApiProperty } from '@nestjs/swagger';
+
+export class CreateUserDto {
+  @ApiProperty({ example: 'john.doe', description: '用户名' })
+  username: string;
+
+  @ApiProperty({ example: 'password123', description: '用户密码' })
+  password: string;
+}
+```
+
+**示例 Controller:**
+```typescript
+// src/users/users.controller.ts
+import { Controller, Post, Body } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { CreateUserDto } from './dto/create-user.dto';
+
+@ApiTags('users') // 将接口归类到 'users' 标签
+@Controller('users')
+export class UsersController {
+  @Post()
+  @ApiOperation({ summary: '创建新用户' }) // 描述操作
+  @ApiResponse({ status: 201, description: '创建成功' })
+  create(@Body() createUserDto: CreateUserDto) {
+    // ...
+  }
+}
+```
+
+### 4. 导入到 Apifox
+
+**方式一：URL 导入 (推荐)**
+
+1.  启动 NestJS 应用: `pnpm run start:dev`。
+2.  应用启动后，访问 `http://localhost:3000/api-docs-json` 即可看到生成的 OpenAPI (JSON) 规范。
+3.  在 Apifox 中，选择 “导入” -> “URL”，粘贴上述地址即可。Apifox 还可以设置定时同步，实现文档的自动更新。
+
+**方式二：文件导入**
+
+1.  在 Apifox 中选择 “导入” -> “文件”，上传由 `SwaggerModule` 生成的 JSON 文件。
+2.  你可以编写一个简单的脚本来将 OpenAPI 对象保存为本地 `swagger.json` 文件，方便在 CI/CD 流程中使用。
