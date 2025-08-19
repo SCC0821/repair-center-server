@@ -540,3 +540,89 @@ bootstrap();
 ```
 
 完成这些步骤后，应用中的任何未捕获异常都将被此过滤器处理，确保了API错误响应的一致性。
+
+---
+
+## 步骤 9: 接口版本控制 (API Versioning)
+
+随着 API 的迭代，对接口进行版本控制是至关重要的。NestJS 提供了强大且灵活的内置版本控制方案。最常用的是 URI 版本控制（例如 `/v1/users`），它最清晰直观。
+
+### 1. 在 `main.ts` 中启用版本控制
+
+首先，在 `main.ts` 中启用版本控制功能，并指定策略为 URI。
+
+```typescript
+// src/main.ts
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { VersioningType } from '@nestjs/common'; // 1. 导入 VersioningType
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  // 2. 启用版本控制
+  app.enableVersioning({
+    type: VersioningType.URI, // 设置版本控制类型为 URI
+    defaultVersion: '1',      // 可选：设置默认版本
+  });
+
+  // ... 其他配置
+  
+  await app.listen(3000);
+}
+bootstrap();
+```
+
+### 2. 在控制器中声明版本
+
+启用后，就可以在控制器或路由上使用 `@Version()` 装饰器来声明它们所属的版本。
+
+下面是一个 `users.controller.ts` 的例子，展示了如何管理 API 版本：
+
+```typescript
+// src/users/users.controller.ts
+import { Controller, Get, Post, Version } from '@nestjs/common';
+
+@Controller('users') // 基础路径是 /users
+export class UsersController {
+
+  // --- V1 的 API ---
+  @Version('1') // 这个路由属于 V1 版本
+  @Get()
+  findAllV1() {
+    // 访问 /v1/users 时会触发这里
+    return { version: 1, data: [{ id: 1, name: 'User A' }] };
+  }
+
+  // --- V2 的 API ---
+  @Version('2') // 这个路由属于 V2 版本
+  @Get()
+  findAllV2() {
+    // 访问 /v2/users 时会触发这里
+    // 假设 V2 返回了更详细的数据结构
+    return {
+      version: 2,
+      data: [{ id: 1, name: 'User A', email: 'a@example.com' }],
+      metadata: { count: 1 },
+    };
+  }
+
+  // --- 某个 API 同时兼容 V1 和 V2 ---
+  @Version(['1', '2']) // 使用数组来支持多个版本
+  @Post()
+  create() {
+    // 访问 /v1/users 或 /v2/users 的 POST 请求都会触发这里
+    return { message: 'User created successfully (compatible with v1 & v2)' };
+  }
+
+  // --- 某个 API 只在 V2 中新增 ---
+  @Version('2')
+  @Get('profile')
+  getProfile() {
+    // 只有访问 /v2/users/profile 时才能触发
+    return { message: 'This is a new feature in V2' };
+  }
+}
+```
+
+通过这种方式，你可以让新旧版本的 API 在同一套代码中平滑地共存和演进。
