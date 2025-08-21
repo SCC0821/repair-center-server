@@ -74,16 +74,31 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// --- Enums ---
+
+enum WorkOrderStatus {
+  PENDING_DISPATCH  // 待派单
+  PENDING_SERVICE   // 待维修 (已派单)
+  IN_PROGRESS       // 维修中
+  COMPLETED         // 已完成
+  CANCELLED         // 已取消
+}
+
+// --- Models ---
+
 // 用户模型
 model User {
-  id            String   @id @default(cuid())
-  phone         String   @unique // 手机号
-  password      String   // 加密后的密码
-  nickname      String?  // 昵称
-  avatarUrl     String?  // 头像
-  wechatOpenid  String?  @unique // 微信 OpenID
-  role          Role     @relation(fields: [roleId], references: [id])
+  id            String      @id @default(cuid())
+  phone         String      @unique // 手机号
+  password      String?     // 加密后的密码, 小程序用户可为空
+  nickname      String?     // 昵称
+  avatarUrl     String?     // 头像
+  status        String      @default("active") // 用户状态, e.g., "active", "banned"
+  wechatOpenid  String?     @unique // 微信 OpenID
+  
+  role          Role        @relation(fields: [roleId], references: [id])
   roleId        String
+  
   workOrders    WorkOrder[] @relation("OwnerWorkOrders")
   assignedTasks WorkOrder[] @relation("MasterWorkOrders")
 }
@@ -97,30 +112,107 @@ model Role {
 
 // 工单模型
 model WorkOrder {
-  id          String   @id @default(cuid())
-  title       String   // 标题
-  description String   // 问题描述
-  images      Json?    // 图片列表 (JSON 数组)
-  status      String   // 状态 (e.g., "pending", "processing", "completed", "cancelled")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  title           String   // 标题
+  description     String   // 问题描述
   
-  owner       User     @relation("OwnerWorkOrders", fields: [ownerId], references: [id])
-  ownerId     String
+  contactName     String   // 联系人姓名 (当次服务联系人)
+  contactPhone    String   // 联系人电话 (当次服务联系人)
+  address         String   // 详细服务地址
   
-  master      User?    @relation("MasterWorkOrders", fields: [masterId], references: [id])
-  masterId    String?
+  repairImages    Json?    // 报修图片列表
+  completedImages Json?    // 完工图片列表
   
-  updates     WorkOrderUpdate[]
+  laborFee        Float?   // 人工费
+  materialFee     Float?   // 材料费
+  totalAmount     Float?   // 总计费用
+  quoteDesc       String?  // 报价说明
+  
+  paymentMethod   String?  // 支付方式 (师傅确认完工时填写)
+  cancelReason    String?  // 取消原因
+  internalNotes   String?  // 内部备注 (CMS 添加)
+
+  status          WorkOrderStatus @default(PENDING_DISPATCH)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // --- 关联关系 ---
+  owner           User     @relation("OwnerWorkOrders", fields: [ownerId], references: [id])
+  ownerId         String   // 关联到下单的“账户”
+  
+  master          User?    @relation("MasterWorkOrders", fields: [masterId], references: [id])
+  masterId        String?  // 关联到“师傅账户”
+
+  serviceItem     ServiceItem @relation(fields: [serviceItemId], references: [id])
+  serviceItemId   String   // 关联到服务项目
+  
+  updates          WorkOrderUpdate[]
+  priceAdjustments PriceAdjustment[]
+  evaluations      Evaluation[]
 }
 
 // 工单更新记录 (用于时间线)
 model WorkOrderUpdate {
+  id           String    @id @default(cuid())
+  description  String    // 更新描述 (e.g., "师傅已接单", "已完成维修")
+  operatorType String    // 操作方 e.g., "system", "user", "master", "admin"
+  operatorId   String?   // 操作员ID (如果是用户/师傅/管理员)
+  createdAt    DateTime  @default(now())
+  workOrder    WorkOrder @relation(fields: [workOrderId], references: [id])
+  workOrderId  String
+}
+
+// 价格调整记录
+model PriceAdjustment {
+  id              String    @id @default(cuid())
+  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id])
+  workOrderId     String
+  
+  operatorId      String    // 操作人ID (只能是管理员)
+  operatorName    String    // 操作人姓名
+  
+  oldLaborFee     Float
+  newLaborFee     Float
+  oldMaterialFee  Float
+  newMaterialFee  Float
+  
+  reason          String    // 调整原因
+  createdAt       DateTime  @default(now())
+}
+
+// 评价模型
+model Evaluation {
   id          String    @id @default(cuid())
-  description String    // 更新描述 (e.g., "师傅已接单", "已完成维修")
-  createdAt   DateTime  @default(now())
   workOrder   WorkOrder @relation(fields: [workOrderId], references: [id])
-  workOrderId String
+  workOrderId String    @unique // 一个工单只允许一次评价
+  
+  ownerId     String    // 评价人 (业主)
+  masterId    String    // 被评价人 (师傅)
+  
+  rating      Int       // 评分 (e.g., 1-5)
+  comment     String?   // 评价内容
+  createdAt   DateTime  @default(now())
+}
+
+// 投诉模型
+model Complaint {
+  id          String   @id @default(cuid())
+  ownerId     String   // 投诉人
+  workOrderId String   // 关联的工单
+  reason      String   // 投诉原因
+  status      String   @default("pending") // e.g., "pending", "resolved"
+  createdAt   DateTime @default(now())
+}
+
+// 服务项目模型
+model ServiceItem {
+  id        String  @id @default(cuid())
+  name      String  @unique
+  iconUrl   String?
+  linkUrl   String?
+  sortOrder Int     @default(0) // 用于排序
+  workOrders WorkOrder[] // 反向关联到工单
 }
 
 // 门店模型

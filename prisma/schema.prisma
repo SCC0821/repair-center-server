@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,4 +5,164 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+// =======================================
+//          ENUMS (枚举定义)
+// =======================================
+
+enum WorkOrderStatus {
+  PENDING_DISPATCH // 待派单
+  PENDING_SERVICE // 待维修 (已派单)
+  IN_PROGRESS // 维修中
+  COMPLETED // 已完成
+  CANCELLED // 已取消
+}
+
+
+// =======================================
+//      CORE BUSINESS MODELS (核心业务模型)
+// =======================================
+
+// --- 工单及其关联模型 ---
+
+model WorkOrder {
+  id              String   @id @default(cuid())
+  title           String   // 工单标题 (简短描述)
+  description     String   // 问题详情的文字描述
+  contactName     String   // 当次服务的联系人姓名
+  contactPhone    String   // 当次服务的联系人电话
+  address         String   // 详细服务地址
+
+  repairImages    Json?    // 报修时上传的图片URL列表
+  completedImages Json?    // 师傅完工时上传的图片URL列表
+
+  laborFee        Float?   // 人工费
+  materialFee     Float?   // 材料费
+  totalAmount     Float?   // 总计费用
+  quoteDesc       String?  // 报价的文字说明
+
+  paymentMethod   String?  // 支付方式 (由师傅在完工时选择)
+  cancelReason    String?  // 订单取消原因
+  internalNotes   String?  // 后台系统添加的内部备注
+
+  status          WorkOrderStatus @default(PENDING_DISPATCH) // 工单状态
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // --- 关联关系 ---
+  owner           User        @relation("OwnerWorkOrders", fields: [ownerId], references: [id])
+  ownerId         String      // 关联到下单的“用户账户”ID
+  master          User?       @relation("MasterWorkOrders", fields: [masterId], references: [id])
+  masterId        String?     // 关联到“师傅账户”ID
+  serviceItem     ServiceItem @relation(fields: [serviceItemId], references: [id])
+  serviceItemId   String      // 关联的服务项目ID
+
+  // --- 反向关系 ---
+  updates          WorkOrderUpdate[]
+  priceAdjustments PriceAdjustment[]
+  evaluations      Evaluation[]
+}
+
+model WorkOrderUpdate {
+  id           String    @id @default(cuid())
+  description  String    // 更新内容的文字描述 (e.g., "师傅已出发")
+  operatorType String    // 操作方类型 (system, user, master, admin)
+  operatorId   String?   // 操作方ID (如果适用)
+  createdAt    DateTime  @default(now())
+  workOrder    WorkOrder @relation(fields: [workOrderId], references: [id])
+  workOrderId  String
+}
+
+model PriceAdjustment {
+  id             String    @id @default(cuid())
+  operatorId     String    // 操作的管理员ID
+  operatorName   String    // 操作的管理员姓名
+  oldLaborFee    Float     // 调整前的人工费
+  newLaborFee    Float     // 调整后的人工费
+  oldMaterialFee Float     // 调整前的材料费
+  newMaterialFee Float     // 调整后的材料费
+  reason         String    // 价格调整原因
+  createdAt      DateTime  @default(now())
+  workOrder      WorkOrder @relation(fields: [workOrderId], references: [id])
+  workOrderId    String
+}
+
+model Evaluation {
+  id          String    @id @default(cuid())
+  workOrderId String    @unique
+  workOrder   WorkOrder @relation(fields: [workOrderId], references: [id])
+  ownerId     String    // 评价人 (业主) ID
+  masterId    String    // 被评价人 (师傅) ID
+  rating      Int       // 评分 (1-5)
+  comment     String?   // 评价文字内容
+  createdAt   DateTime  @default(now())
+}
+
+model Complaint {
+  id          String   @id @default(cuid())
+  ownerId     String   // 投诉人ID
+  workOrderId String   // 关联的工单ID
+  reason      String   // 投诉原因
+  status      String   @default("pending") // 投诉状态 (pending, resolved)
+  createdAt   DateTime @default(now())
+}
+
+// --- 服务项目模型 ---
+
+model ServiceItem {
+  id         String      @id @default(cuid())
+  name       String      @unique // 服务名称 (e.g., "水电维修")
+  iconUrl    String?     // 服务图标URL
+  linkUrl    String?     // 点击跳转链接 (如果需要)
+  sortOrder  Int         @default(0) // 用于后台排序
+  workOrders WorkOrder[] // 反向关联到工单
+}
+
+
+// =======================================
+//    USER & ACCESS CONTROL (用户与权限模型)
+// =======================================
+
+model User {
+  id           String      @id @default(cuid())
+  phone        String      @unique // 登录手机号
+  password     String?     // 加密后的密码 (小程序用户可为空)
+  nickname     String?     // 账户昵称
+  avatarUrl    String?     // 账户头像URL
+  status       String      @default("active") // 账户状态 (active, banned)
+  wechatOpenid String?     @unique // 微信小程序的OpenID
+  roleId       String      // 关联的角色ID
+  role         Role        @relation(fields: [roleId], references: [id])
+  
+  // --- 反向关系 ---
+  workOrders    WorkOrder[] @relation("OwnerWorkOrders") // 作为业主创建的工单
+  assignedTasks WorkOrder[] @relation("MasterWorkOrders") // 作为师傅被指派的工单
+}
+
+model Role {
+  id    String @id @default(cuid())
+  name  String @unique // 角色名称 (admin, owner, master)
+  users User[]
+}
+
+
+// =======================================
+//   CONTENT & SUPPORTING MODELS (内容与支撑模型)
+// =======================================
+
+model Store {
+  id        String  @id @default(cuid())
+  name      String  // 门店名称
+  address   String  // 门店地址
+  phone     String? // 门店电话
+  latitude  Float   // 地理位置：纬度
+  longitude Float   // 地理位置：经度
+}
+
+model Banner {
+  id       String  @id @default(cuid())
+  imageUrl String  // 图片URL
+  linkUrl  String? // 点击图片后的跳转链接
 }
