@@ -24,7 +24,6 @@ async function bootstrap() {
     .setTitle('维修中心 API 文档')
     .setDescription('这是维修中心项目的 API 详细文档')
     .setVersion('1.0')
-    .addTag('users', '用户模块')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
