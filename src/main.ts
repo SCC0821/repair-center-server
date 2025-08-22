@@ -4,6 +4,7 @@ import { Logger } from 'nestjs-pino';
 import { VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from '@/common/filters/all-exceptions.filter';
+import { TransformInterceptor } from '@/common/interceptors/transform.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -14,6 +15,8 @@ async function bootstrap() {
   app.useLogger(app.get(Logger));
   // 注册为全局过滤器
   app.useGlobalFilters(new AllExceptionsFilter());
+  // 注册全局拦截器
+  app.useGlobalInterceptors(new TransformInterceptor());
   // 启用版本控制
   app.enableVersioning({
     type: VersioningType.URI, // 设置版本控制类型为 URI

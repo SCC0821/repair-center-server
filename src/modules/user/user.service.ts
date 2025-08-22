@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { PrismaService } from '@/database/prisma/prisma.service';
+import { ListUserDto } from './dto/list-user.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class UserService {
@@ -28,16 +30,44 @@ export class UserService {
     // return 'This action adds a new user';
   }
 
-  findAll() {
-    return this.prisma.user.findMany({
-      select: {
-        id: true,
-        phone: true,
-        status: true,
-        roleId: true,
-        role: true,
-      },
-    });
+  async list(query: ListUserDto) {
+    const { pageNum = 1, pageSize = 10, status, phone, userName } = query;
+    const skip = (pageNum - 1) * pageSize;
+    const take = pageSize;
+
+    const where: Prisma.UserWhereInput = {};
+
+    if (status) {
+      where.status = status;
+    }
+    if (phone) {
+      where.phone = { contains: phone };
+    }
+    if (userName) {
+      where.userName = { contains: userName };
+    }
+
+    const [list, total] = await this.prisma.$transaction([
+      this.prisma.user.findMany({
+        where,
+        skip,
+        take,
+        select: {
+          id: true,
+          userName: true,
+          phone: true,
+          status: true,
+          roleId: true,
+          role: true,
+        },
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      list,
+      total,
+    };
   }
 
   findOne(id: number) {
